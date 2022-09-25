@@ -13,6 +13,7 @@ ctrlc = "3.2.3"
 plain = "0.2.3"
 num_cpus = "1.0"
 cpal = "0.14.0"
+serde = "1.0.0"
 perf-event-open-sys = "1.0.1"
 
 [build-dependencies]
