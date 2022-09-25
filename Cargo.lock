@@ -95,6 +95,7 @@ dependencies = [
  "num_cpus",
  "perf-event-open-sys",
  "plain",
+ "serde",
 ]
 
 [[package]]

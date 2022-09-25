@@ -1,16 +1,18 @@
 use anyhow::{anyhow, bail, Context, Result};
 use core::time::Duration;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::Data;
+use cpal::{Data, Stream};
 use libbpf_rs::RingBufferBuilder;
 use perf_event_open_sys as perf;
 use plain::Plain;
+use serde::{de::Error, Deserialize, Deserializer};
 use std::collections::HashMap;
-use std::fs;
-use std::net::Ipv4Addr;
-use std::path::Path;
-use std::process;
+use std::io;
+use std::num::ParseIntError;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::thread;
 extern crate clap;
@@ -23,6 +25,20 @@ mod bpftune;
 use bpftune::*;
 
 unsafe impl Plain for bpftune_bss_types::stacktrace_event {}
+
+impl FromStr for bpftune_bss_types::stacktrace_event {
+    type Err = ParseIntError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let split: Vec<&str> = s.split_whitespace().collect();
+        let mut event = bpftune_bss_types::stacktrace_event::default();
+        event.pid = split[2].parse().unwrap();
+        let ustack: [u64; 128] = [split[4].parse().unwrap(); 128];
+        event.ustack = ustack;
+        let kstack: [u64; 128] = [split[6].parse().unwrap(); 128];
+        event.kstack = kstack;
+        Ok(event)
+    }
+}
 
 fn bump_memlock_rlimit() -> Result<()> {
     let rlimit = libc::rlimit {
@@ -42,7 +58,7 @@ fn handle_event(data: &[u8]) -> i32 {
         return 0;
     }
     println!(
-        "pid: {}, ustack: {} kstack: {}",
+        "stacktrace_event pid: {} ustack: {} kstack: {}",
         event.pid, event.ustack[0], event.kstack[0]
     );
     0
@@ -112,23 +128,94 @@ where
     }
 }
 
+fn write_data<T>(output: &mut [T], channels: usize, next_sample: &mut dyn FnMut() -> f32)
+where
+    T: cpal::Sample,
+{
+    for frame in output.chunks_mut(channels) {
+        let value: T = cpal::Sample::from::<f32>(&next_sample());
+        for sample in frame.iter_mut() {
+            *sample = value;
+        }
+    }
+}
+
+pub fn run<T>(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    rx: std::sync::mpsc::Receiver<bpftune_bss_types::stacktrace_event>,
+) -> Result<(Stream), anyhow::Error>
+where
+    T: cpal::Sample,
+{
+    let sample_rate = config.sample_rate.0 as f32;
+    let channels = config.channels as usize;
+
+    // Produce a sinusoid of maximum amplitude.
+    let mut sample_clock = 0f32;
+    let mut next_value = move || {
+        let stack_sample: bpftune_bss_types::stacktrace_event = rx.recv().unwrap();
+        let val = stack_sample.pid % 6;
+        sample_clock = (sample_clock + 1.0) % sample_rate;
+        //(sample_clock * 440.0 * 2.0 * std::f32::consts::PI / sample_rate).sin()
+        let res = (sample_clock * 440.0 * 2.0 * std::f32::consts::PI / sample_rate).sin();
+        println!(
+            "res {} clock {} rate {} pid {} ustack {}",
+            res, sample_clock, sample_rate, stack_sample.pid, stack_sample.ustack[0]
+        );
+        res
+    };
+
+    let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
+
+    let stream = device.build_output_stream(
+        config,
+        move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+            write_data(data, channels, &mut next_value)
+        },
+        err_fn,
+    )?;
+    stream.play()?;
+
+    Ok(stream)
+}
+
 #[derive(Debug)]
 struct Opt {
     device: String,
     debug: bool,
+    silent: bool,
     pid: i32,
     freq: u64,
+    play: bool,
 }
 
 impl Opt {
     fn from_args() -> Self {
         let app = clap::Command::new("bpftune")
+            .subcommand(
+                clap::Command::new("play").arg(
+                    Arg::new("device")
+                        .long("device")
+                        .takes_value(true)
+                        .default_value("default")
+                        .help("audio device"),
+                ),
+            )
             .arg(
                 Arg::new("device")
                     .long("device")
                     .takes_value(true)
                     .default_value("default")
                     .help("audio device"),
+            )
+            .arg(
+                Arg::new("silent")
+                    .short('s')
+                    .long("silent")
+                    .takes_value(false)
+                    .action(ArgAction::SetTrue)
+                    .help("disable audio"),
             )
             .arg(
                 Arg::new("debug")
@@ -151,10 +238,11 @@ impl Opt {
                     .short('f')
                     .long("freq")
                     .takes_value(true)
-                    .default_value("99")
+                    .default_value("440")
                     .help("default sampling frequency"),
             );
         let matches = app.get_matches();
+        let play = !matches.subcommand_matches("play").is_none();
         let device = matches.value_of("device").unwrap_or("default").to_string();
         let freq = matches
             .value_of("freq")
@@ -169,20 +257,20 @@ impl Opt {
             .parse::<i32>()
             .unwrap();
         let debug = matches.get_flag("debug");
+        let silent = matches.get_flag("silent");
 
         Opt {
             device,
             debug,
+            silent,
             pid,
             freq,
+            play,
         }
     }
 }
 
-fn main() -> Result<()> {
-    let opt = Opt::from_args();
-
-    /*
+fn play(opt: Opt) -> Result<()> {
     let host = cpal::default_host();
 
     let out_device = if opt.device == "default" {
@@ -197,13 +285,72 @@ fn main() -> Result<()> {
     }
 
     let config = out_device.default_output_config()?;
+    let (tx, rx): (
+        Sender<bpftune_bss_types::stacktrace_event>,
+        Receiver<bpftune_bss_types::stacktrace_event>,
+    ) = mpsc::channel();
+
+    let child = thread::spawn(move || {
+        println!("sample 2");
+        let lines = io::stdin().lines();
+        for line in lines {
+            if line.is_err() {
+                break;
+            }
+            let stack = bpftune_bss_types::stacktrace_event::from_str(&line.unwrap()).unwrap();
+            tx.send(stack);
+        }
+    });
 
     let stream = match config.sample_format() {
-        cpal::SampleFormat::F32 => stream_make::<f32, _>(&out_device, &config.into(), sample_next),
-        cpal::SampleFormat::I16 => stream_make::<i16, _>(&out_device, &config.into(), sample_next),
-        cpal::SampleFormat::U16 => stream_make::<u16, _>(&out_device, &config.into(), sample_next),
+        //cpal::SampleFormat::F32 => stream_make::<f32, _>(&out_device, &config.into(), sample_next),
+        //cpal::SampleFormat::I16 => stream_make::<i16, _>(&out_device, &config.into(), sample_next),
+        //cpal::SampleFormat::U16 => stream_make::<u16, _>(&out_device, &config.into(), sample_next),
+        cpal::SampleFormat::F32 => run::<f32>(&out_device, &config.into(), rx),
+        cpal::SampleFormat::I16 => run::<i16>(&out_device, &config.into(), rx),
+        cpal::SampleFormat::U16 => run::<u16>(&out_device, &config.into(), rx),
     }?;
-    */
+
+    child.join().unwrap();
+    stream.as_inner();
+
+    Ok(())
+}
+
+fn main() -> Result<()> {
+    let opt = Opt::from_args();
+    if opt.play {
+        return play(opt);
+    }
+
+    if !opt.silent {
+        let host = cpal::default_host();
+
+        let out_device = if opt.device == "default" {
+            host.default_output_device()
+        } else {
+            host.output_devices()?
+                .find(|x| x.name().map(|y| y == opt.device).unwrap_or(false))
+        }
+        .expect("failed to find output device");
+        if opt.debug {
+            println!("audio device: {}", out_device.name()?);
+        }
+
+        let config = out_device.default_output_config()?;
+
+        let stream = match config.sample_format() {
+            cpal::SampleFormat::F32 => {
+                stream_make::<f32, _>(&out_device, &config.into(), sample_next)
+            }
+            cpal::SampleFormat::I16 => {
+                stream_make::<i16, _>(&out_device, &config.into(), sample_next)
+            }
+            cpal::SampleFormat::U16 => {
+                stream_make::<u16, _>(&out_device, &config.into(), sample_next)
+            }
+        }?;
+    }
 
     let mut skel_builder = BpftuneSkelBuilder::default();
     if opt.debug {
@@ -212,9 +359,6 @@ fn main() -> Result<()> {
 
     bump_memlock_rlimit()?;
     let skel_ = skel_builder.open()?;
-    // if let Some(pid) = opts.pid {
-    //     skel_.rodata().target_pid = pid;
-    // }
 
     let mut skel = skel_.load()?;
     let mut rbb = RingBufferBuilder::new();
@@ -241,7 +385,6 @@ fn main() -> Result<()> {
                 perf::bindings::PERF_FLAG_FD_CLOEXEC as u64,
             )
         };
-        // perf_event_open_sys::ioctls::ENABLE(result);
         let link = skel.progs_mut().profile().attach_perf_event(result)?;
         perf_fds.insert(result, link);
         if opt.debug {
