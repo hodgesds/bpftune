@@ -1,13 +1,12 @@
 # bpftune
-`bpftune` is a "profiler" that generates audio based on profiling data.
-Curently the profiler uses a bpf stack sampling profile for generating
+`bpftune` is a "profiler" that can also generate audio streams from profiling
+data. Curently the profiler uses a bpf stack sampling profiles for generating
 output. The goal of this project is to turn sampling profiles into interesting
 sounds.
 
 This project uses [`libbpf-rs`](https://github.com/libbpf/libbpf-rs) for
 profiling and [`cpal`](https://github.com/RustAudio/cpal) for handling audio
-streams. Think of it as a way of turning profiling events into audio and then
-piping that into an audio stream.
+streams.
 
 ## Usage
 To get raw stacks (unsymbolized) use `bpftune --silent`:
@@ -30,6 +29,31 @@ stacktrace_event pid: 7797 ustack: 139888068004947 kstack: 18446744072549206930
 stacktrace_event pid: 25549 ustack: 94776529257699 kstack: 0
 stacktrace_event pid: 25549 ustack: 139847271437474 kstack: 0
 stacktrace_event pid: 7797 ustack: 139888070505745 kstack: 18446744072549232148
+```
+
+To profile a single pid:
+```
+sudo ./target/debug/bpftune --pid 7797 --silent
+stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072547416966
+stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072547416966
+stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072547416966
+stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072547416966
+stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072547416966
+stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072546370169
+stacktrace_event pid: 7797 ustack: 139888068004947 kstack: 18446744072549476571
+stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845892
+stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845892
+stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845892
+stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845892
+stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845892
+stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072549782825
+stacktrace_event pid: 7797 ustack: 139888068524319 kstack: 0
+stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845981
+stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845981
+stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845981
+stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845981
+stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845981
+stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072547605074
 ```
 
 ## System Requirements
