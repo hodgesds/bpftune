@@ -144,26 +144,33 @@ pub fn run<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     rx: std::sync::mpsc::Receiver<bpftune_bss_types::stacktrace_event>,
-) -> Result<(Stream), anyhow::Error>
+) -> Result<Stream, anyhow::Error>
 where
     T: cpal::Sample,
 {
     let sample_rate = config.sample_rate.0 as f32;
     let channels = config.channels as usize;
+    println!("channels {}, sample_rate {}", channels, sample_rate);
 
     // Produce a sinusoid of maximum amplitude.
     let mut sample_clock = 0f32;
     let mut next_value = move || {
-        let stack_sample: bpftune_bss_types::stacktrace_event = rx.recv().unwrap();
-        let val = stack_sample.pid % 6;
         sample_clock = (sample_clock + 1.0) % sample_rate;
-        //(sample_clock * 440.0 * 2.0 * std::f32::consts::PI / sample_rate).sin()
-        let res = (sample_clock * 440.0 * 2.0 * std::f32::consts::PI / sample_rate).sin();
+        let stack_sample: bpftune_bss_types::stacktrace_event = rx.recv().unwrap();
+        let base_freq = stack_sample.pid;
+        let stack_offset = stack_sample.ustack[0];
+        // let kstack_offset = stack_sample.kstack[0]; //  % 10;
+        let res = (base_freq * 1 + stack_offset as u32) as f32;
+
         println!(
             "res {} clock {} rate {} pid {} ustack {}",
-            res, sample_clock, sample_rate, stack_sample.pid, stack_sample.ustack[0]
+            res.sin(),
+            sample_clock,
+            sample_rate,
+            stack_sample.pid,
+            stack_sample.ustack[0]
         );
-        res
+        res.sin()
     };
 
     let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
@@ -238,7 +245,7 @@ impl Opt {
                     .short('f')
                     .long("freq")
                     .takes_value(true)
-                    .default_value("440")
+                    .default_value("4400")
                     .help("default sampling frequency"),
             );
         let matches = app.get_matches();
@@ -291,14 +298,15 @@ fn play(opt: Opt) -> Result<()> {
     ) = mpsc::channel();
 
     let child = thread::spawn(move || {
-        println!("sample 2");
         let lines = io::stdin().lines();
         for line in lines {
             if line.is_err() {
                 break;
             }
             let stack = bpftune_bss_types::stacktrace_event::from_str(&line.unwrap()).unwrap();
-            tx.send(stack);
+            for _ in 0..100 {
+                let _ = tx.send(stack);
+            }
         }
     });
 
