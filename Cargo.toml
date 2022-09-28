@@ -15,6 +15,7 @@ num_cpus = "1.0"
 cpal = "0.14.0"
 serde = "1.0.0"
 perf-event-open-sys = "1.0.1"
+blazesym = "0.1.0"
 
 [build-dependencies]
 libbpf-cargo = "0.12"

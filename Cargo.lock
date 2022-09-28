@@ -82,10 +82,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
+name = "blazesym"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "364dbb93db02047f8f0211a4856f6d67a6f03ccd4276fc07c09b8376eb8d0bc1"
+dependencies = [
+ "cbindgen",
+ "nix 0.24.2",
+ "regex",
+]
+
+[[package]]
 name = "bpftune"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blazesym",
  "clap",
  "cpal",
  "ctrlc",
@@ -139,6 +151,25 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "cbindgen"
+version = "0.24.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6358dedf60f4d9b8db43ad187391afe959746101346fe51bb978126bec61dfb"
+dependencies = [
+ "clap",
+ "heck 0.4.0",
+ "indexmap",
+ "log",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn",
+ "tempfile",
+ "toml",
 ]
 
 [[package]]

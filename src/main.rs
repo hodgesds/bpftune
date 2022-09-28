@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
+use blazesym::{BlazeSymbolizer, SymbolSrcCfg, SymbolizedResult};
 use core::time::Duration;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Data, Stream};
@@ -6,12 +7,14 @@ use libbpf_rs::RingBufferBuilder;
 use perf_event_open_sys as perf;
 use plain::Plain;
 use serde::{de::Error, Deserialize, Deserializer};
+use std::array::IntoIter;
 use std::collections::HashMap;
 use std::io;
 use std::num::ParseIntError;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::mpsc::channel;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::thread;
@@ -160,10 +163,12 @@ where
         let base_freq = stack_sample.pid;
         let stack_offset = stack_sample.ustack[0];
         // let kstack_offset = stack_sample.kstack[0]; //  % 10;
-        let res = (base_freq * 1 + stack_offset as u32) as f32;
+        //let res = (base_freq * 1 + stack_offset as u32) as f32;
+        let res = (base_freq + 1/*stack_offset as u32*/) as f32;
 
         println!(
-            "res {} clock {} rate {} pid {} ustack {}",
+            "res {} sin {} clock {} rate {} pid {} ustack {}",
+            res,
             res.sin(),
             sample_clock,
             sample_rate,
@@ -304,7 +309,7 @@ fn play(opt: Opt) -> Result<()> {
                 break;
             }
             let stack = bpftune_bss_types::stacktrace_event::from_str(&line.unwrap()).unwrap();
-            for _ in 0..100 {
+            for _ in 0..8 {
                 let _ = tx.send(stack);
             }
         }
@@ -370,7 +375,70 @@ fn main() -> Result<()> {
 
     let mut skel = skel_.load()?;
     let mut rbb = RingBufferBuilder::new();
-    rbb.add(skel.maps_mut().events(), handle_event)?;
+
+    let (tx, rx): (
+        Sender<bpftune_bss_types::stacktrace_event>,
+        Receiver<bpftune_bss_types::stacktrace_event>,
+    ) = mpsc::channel();
+
+    if opt.pid != -1 {
+        let sym_srcs = [SymbolSrcCfg::Process {
+            pid: Some(opt.pid as u32),
+        }];
+        rbb.add(skel.maps_mut().events(), move |data: &[u8]| {
+            let mut event = bpftune_bss_types::stacktrace_event::default();
+            plain::copy_from_bytes(&mut event, data).expect("Event data buffer was too short");
+            if event.pid == 0 {
+                return 0;
+            }
+            tx.send(event).unwrap();
+            0
+        })?;
+        thread::spawn(move || loop {
+            let symbolizer = BlazeSymbolizer::new().unwrap();
+            let stack_sym = rx.recv().unwrap();
+            let symlist = symbolizer.symbolize(&sym_srcs, &stack_sym.ustack.to_vec());
+            for i in 0..stack_sym.ustack.len() {
+                let address = stack_sym.ustack[i];
+                if symlist.len() <= i || symlist[i].len() == 0 {
+                    continue;
+                }
+                let sym_results = &symlist[i];
+                if sym_results.len() > 1 {
+                    // One address may get several results (ex, inline code)
+                    println!("0x{:016x} ({} entries)", address, sym_results.len());
+
+                    for result in sym_results {
+                        let SymbolizedResult {
+                            symbol,
+                            start_address,
+                            path,
+                            line_no,
+                            column,
+                        } = result;
+                        println!(
+                            "    {}@0x{:016x} {}:{}",
+                            symbol, start_address, path, line_no
+                        );
+                    }
+                } else {
+                    let SymbolizedResult {
+                        symbol,
+                        start_address,
+                        path,
+                        line_no,
+                        column,
+                    } = &sym_results[0];
+                    println!(
+                        "0x{:016x} {}@0x{:016x} {}:{}",
+                        address, symbol, start_address, path, line_no
+                    );
+                }
+            }
+        });
+    } else {
+        rbb.add(skel.maps_mut().events(), handle_event)?;
+    }
     let rb = rbb.build()?;
 
     let mut perf_fds = HashMap::new();
