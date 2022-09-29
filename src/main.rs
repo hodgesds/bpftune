@@ -55,19 +55,6 @@ fn sin_tone(sample_clock: f32, sample_rate: f32, freq: f32) -> f32 {
     (sample_clock * freq * 2.0 * std::f32::consts::PI / sample_rate).sin()
 }
 
-fn handle_event(data: &[u8]) -> i32 {
-    let mut event = bpftune_bss_types::stacktrace_event::default();
-    plain::copy_from_bytes(&mut event, data).expect("Event data buffer was too short");
-    if event.pid == 0 {
-        return 0;
-    }
-    println!(
-        "stacktrace_event pid: {} ustack: {} kstack: {}",
-        event.pid, event.ustack[0], event.kstack[0]
-    );
-    0
-}
-
 fn write_data<T>(output: &mut [T], channels: usize, next_sample: &mut dyn FnMut() -> f32)
 where
     T: cpal::Sample,
@@ -156,6 +143,7 @@ struct Opt {
     pid: i32,
     freq: u64,
     play: bool,
+    hex: bool,
     symbolize: bool,
     event: String,
     transform: String,
@@ -211,6 +199,13 @@ impl Opt {
                     .help("enable debugging"),
             )
             .arg(
+                Arg::new("hex")
+                    .long("hex")
+                    .takes_value(false)
+                    .action(ArgAction::SetTrue)
+                    .help("print offsets in hex"),
+            )
+            .arg(
                 Arg::new("symbolize")
                     .short('s')
                     .long("sym")
@@ -260,6 +255,7 @@ impl Opt {
             .unwrap();
         let debug = matches.get_flag("debug");
         let symbolize = matches.get_flag("symbolize");
+        let hex = matches.get_flag("hex");
         let mut opt = Opt {
             device: device,
             debug: debug,
@@ -267,6 +263,7 @@ impl Opt {
             symbolize: symbolize,
             freq: freq,
             play: play,
+            hex: hex,
             event: event,
             transform: "default".to_string(),
             repeat: 10,
@@ -382,7 +379,7 @@ fn main() -> Result<()> {
                 let sym_results = &symlist[i];
                 if sym_results.len() > 1 {
                     // One address may get several results (ex, inline code)
-                    println!("0x{:016x} ({} entries)", address, sym_results.len());
+                    println!("0x{:x} ({} entries)", address, sym_results.len());
 
                     for result in sym_results {
                         let SymbolizedResult {
@@ -392,10 +389,7 @@ fn main() -> Result<()> {
                             line_no,
                             column,
                         } = result;
-                        println!(
-                            "    {}@0x{:016x} {}:{}",
-                            symbol, start_address, path, line_no
-                        );
+                        println!("    {}@0x{:#x} {}:{}", symbol, start_address, path, line_no);
                     }
                 } else {
                     let SymbolizedResult {
@@ -406,14 +400,33 @@ fn main() -> Result<()> {
                         column,
                     } = &sym_results[0];
                     println!(
-                        "0x{:016x} {}@0x{:016x} {}:{}",
+                        "0x{:#x} {}@0x{:#x} {}:{}",
                         address, symbol, start_address, path, line_no
                     );
                 }
             }
         });
     } else {
-        rbb.add(skel.maps_mut().events(), handle_event)?;
+        let hex = opt.hex;
+        rbb.add(skel.maps_mut().events(), move |data: &[u8]| {
+            let mut event = bpftune_bss_types::stacktrace_event::default();
+            plain::copy_from_bytes(&mut event, data).expect("Event data buffer was too short");
+            if event.pid == 0 {
+                return 0;
+            }
+            if hex {
+                println!(
+                    "stacktrace_event pid: {} ustack: {:#x} kstack: {:#x}",
+                    event.pid, event.ustack[0], event.kstack[0]
+                );
+            } else {
+                println!(
+                    "stacktrace_event pid: {} ustack: {} kstack: {}",
+                    event.pid, event.ustack[0], event.kstack[0]
+                );
+            }
+            0
+        })?;
     }
     let rb = rbb.build()?;
 
@@ -456,7 +469,7 @@ fn main() -> Result<()> {
     })?;
 
     while running.load(Ordering::SeqCst) {
-        rb.poll(Duration::from_millis(50))?;
+        rb.poll(Duration::from_millis(1))?;
     }
     perf_fds.capacity();
     Ok(())
