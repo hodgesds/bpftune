@@ -156,6 +156,7 @@ struct Opt {
     pid: i32,
     freq: u64,
     play: bool,
+    symbolize: bool,
     event: String,
     transform: String,
     repeat: u32,
@@ -210,6 +211,14 @@ impl Opt {
                     .help("enable debugging"),
             )
             .arg(
+                Arg::new("symbolize")
+                    .short('s')
+                    .long("sym")
+                    .takes_value(false)
+                    .action(ArgAction::SetTrue)
+                    .help("enable symbolization (--pid mode only)"),
+            )
+            .arg(
                 Arg::new("pid")
                     .short('p')
                     .long("pid")
@@ -250,10 +259,12 @@ impl Opt {
             .parse::<i32>()
             .unwrap();
         let debug = matches.get_flag("debug");
+        let symbolize = matches.get_flag("symbolize");
         let mut opt = Opt {
             device: device,
             debug: debug,
             pid: pid,
+            symbolize: symbolize,
             freq: freq,
             play: play,
             event: event,
@@ -346,7 +357,7 @@ fn main() -> Result<()> {
         Receiver<bpftune_bss_types::stacktrace_event>,
     ) = mpsc::channel();
 
-    if opt.pid != -1 {
+    if opt.pid != -1 && opt.symbolize {
         let sym_srcs = [SymbolSrcCfg::Process {
             pid: Some(opt.pid as u32),
         }];
