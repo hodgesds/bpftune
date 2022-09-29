@@ -1,3 +1,15 @@
+
+
+https://user-images.githubusercontent.com/2632746/192927163-4bacdcd0-8ba0-471e-b4c3-6155e064317c.mov
+
+
+
+https://user-images.githubusercontent.com/2632746/192927165-bed32ec3-d2b9-4884-86e5-4ef185a46362.mov
+
+
+
+https://user-images.githubusercontent.com/2632746/192927167-5d7f7404-2d5b-48f2-b930-313c62e38d80.mov
+
 # bpftune
 `bpftune` is a "profiler" that can also generate audio streams from profiling
 data. Curently the profiler uses a bpf stack sampling profiles for generating
