@@ -36,24 +36,32 @@ To profile a single pid:
 sudo ./target/debug/bpftune --pid 7797 --silent
 stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072547416966
 stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072547416966
-stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072547416966
-stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072547416966
-stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072547416966
 stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072546370169
 stacktrace_event pid: 7797 ustack: 139888068004947 kstack: 18446744072549476571
-stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845892
-stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845892
-stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845892
-stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845892
 stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845892
 stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072549782825
 stacktrace_event pid: 7797 ustack: 139888068524319 kstack: 0
 stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845981
-stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845981
-stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845981
-stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845981
-stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072548845981
 stacktrace_event pid: 7797 ustack: 139888068171075 kstack: 18446744072547605074
+```
+
+Symbolization (via blazesym) requires passing the `--pid` flag:
+```
+sudo ./target/debug/bpftune --silent --pid 9165
+0x00007fed76d8c543 poll@0x00007fed76d8c530 :0
+0x00007fed76fba7d5 _nc_wgetch@0x00007fed76fb9f80 :0
+0x00007fed76fbac67 wgetch@0x00007fed76fbac30 :0
+0x00007fed76d8c543 poll@0x00007fed76d8c530 :0
+0x00007fed76fba7d5 _nc_wgetch@0x00007fed76fb9f80 :0
+0x00007fed76fbac67 wgetch@0x00007fed76fbac30 :0
+0x00007fed76d8c543 poll@0x00007fed76d8c530 :0
+0x00007fed76fba7d5 _nc_wgetch@0x00007fed76fb9f80 :0
+0x00007fed76fbac67 wgetch@0x00007fed76fbac30 :0
+0x00007fed76d8c543 poll@0x00007fed76d8c530 :0
+0x00007fed76fba7d5 _nc_wgetch@0x00007fed76fb9f80 :0
+0x00007fed76fbac67 wgetch@0x00007fed76fbac30 :0
+0x00007fed76d8c543 poll@0x00007fed76d8c530 :0
+0x00007fed76fba7d5 _nc_wgetch@0x00007fed76fb9f80 :0
 ```
 
 ## System Requirements
@@ -66,8 +74,6 @@ probably need a newish kernel (5.8+) for proper support.
  - It depends on your pulseaudio setup. The root user may have a different
    config or different access to the daemon. You may need to run `bpftune
    --slient | bpftune play` instead.
-- How do I symbolize the profiles?
- - At some point I'll probably add [`blazesym`](https://github.com/libbpf/blazesym) support.
 - This code sucks.
  - Yeah, it's a proof of concept and once things are better fleshed out I'll
    maybe rewrite it, or you can send a pull request.
