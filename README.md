@@ -73,11 +73,16 @@ probably need a newish kernel (5.8+) for proper support.
 
 ## FAQs
 - Why doesn't audio work?
- - It depends on your pulseaudio setup. The root user may have a different
+  - It depends on your pulseaudio setup. The root user may have a different
    config or different access to the daemon. You may need to run `sudo bpftune
     | bpftune play` instead.
+- What is `--repeat` flag on the `play` subcommand used for?
+  - The `--repeat` flag allows you to repeat a sample, otherwise the sample will only
+    be mapped to a single channel. Depending on the audio device setup it may be useful
+    to repeat for as many channels. The repeat rate can also be used if the sampling
+    rate is too low.
 - This code sucks.
- - Yeah, it's a proof of concept and once things are better fleshed out I'll
+  - Yeah, it's a proof of concept and once things are better fleshed out I'll
    maybe rewrite it, or you can send a pull request.
 
 ## Audio samples
