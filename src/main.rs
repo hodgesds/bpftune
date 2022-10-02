@@ -25,6 +25,7 @@ mod bpftune;
 use bpftune::*;
 
 unsafe impl Plain for bpftune_bss_types::stacktrace_event {}
+unsafe impl Plain for bpftune_bss_types::eth_event {}
 
 impl FromStr for bpftune_bss_types::stacktrace_event {
     type Err = ParseIntError;
@@ -148,6 +149,7 @@ struct Opt {
     event: String,
     transform: String,
     repeat: u32,
+    interface: i32,
 }
 
 impl Opt {
@@ -189,6 +191,14 @@ impl Opt {
                     .takes_value(true)
                     .default_value("default")
                     .help("audio device"),
+            )
+            .arg(
+                Arg::new("interface")
+                    .short('i')
+                    .long("if")
+                    .takes_value(true)
+                    .default_value("-1")
+                    .help("network interface"),
             )
             .arg(
                 Arg::new("debug")
@@ -233,7 +243,7 @@ impl Opt {
                 Arg::new("event")
                     .short('e')
                     .long("event")
-                    .value_parser(["cycles", "clock"])
+                    .value_parser(["cycles", "clock", "none"])
                     .default_value("clock")
                     .help("perf event to attach to (PERF_COUNT_HW_CPU_CYCLES, or PERF_COUNT_SW_CPU_CLOCK)"),
             );
@@ -267,6 +277,12 @@ impl Opt {
             event: event,
             transform: "default".to_string(),
             repeat: 10,
+            interface: matches
+                .value_of("interface")
+                .unwrap_or("-1")
+                .to_string()
+                .parse::<i32>()
+                .unwrap(),
         };
         if play {
             let play_matches = matches.subcommand_matches("play").unwrap();
@@ -354,7 +370,7 @@ fn main() -> Result<()> {
         Receiver<bpftune_bss_types::stacktrace_event>,
     ) = mpsc::channel();
 
-    if opt.pid != -1 && opt.symbolize {
+    if opt.pid != -1 && opt.symbolize && opt.event != "none" {
         let sym_srcs = [SymbolSrcCfg::Process {
             pid: Some(opt.pid as u32),
         }];
@@ -406,7 +422,7 @@ fn main() -> Result<()> {
                 }
             }
         });
-    } else {
+    } else if opt.event != "none" {
         let hex = opt.hex;
         rbb.add(skel.maps_mut().events(), move |data: &[u8]| {
             let mut event = bpftune_bss_types::stacktrace_event::default();
@@ -428,37 +444,60 @@ fn main() -> Result<()> {
             0
         })?;
     }
+    if opt.interface >= 0 {
+        let link = skel.progs_mut().xdp_pass().attach_xdp(opt.interface)?;
+        skel.links = BpftuneLinks {
+            xdp_pass: Some(link),
+            profile: None,
+        };
+        rbb.add(skel.maps_mut().eth_events(), move |data: &[u8]| {
+            let mut event = bpftune_bss_types::eth_event::default();
+            plain::copy_from_bytes(&mut event, data).expect("Event data buffer was too short");
+            println!(
+                "event proto: {}, ttl: {} saddr: {} daddr {}, port {} seq {}",
+                event.proto, event.ttl, event.saddr, event.daddr, event.port, event.seq
+            );
+
+            if event.port == 0 {
+                return 0;
+            }
+            //tx.send(event).unwrap();
+            0
+        })?;
+    }
     let rb = rbb.build()?;
 
-    let mut perf_fds = HashMap::new();
+    if opt.event != "none" {
+        let mut perf_fds = HashMap::new();
 
-    for cpu in 0..num_cpus::get() {
-        let mut attrs = perf::bindings::perf_event_attr::default();
-        attrs.size = std::mem::size_of::<perf::bindings::perf_event_attr>() as u32;
-        if opt.event == "cycles" {
-            attrs.type_ = perf::bindings::perf_type_id_PERF_TYPE_HARDWARE;
-            attrs.config = perf::bindings::perf_hw_id_PERF_COUNT_HW_CPU_CYCLES as u64;
-        } else if opt.event == "clock" {
-            attrs.type_ = perf::bindings::perf_type_id_PERF_TYPE_SOFTWARE;
-            attrs.config = perf::bindings::perf_sw_ids_PERF_COUNT_SW_CPU_CLOCK as u64;
-        }
-        attrs.__bindgen_anon_1.sample_freq = opt.freq;
-        attrs.set_freq(1);
-        // attrs.set_exclude_kernel(0);
-        attrs.set_exclude_hv(1);
-        let result = unsafe {
-            perf::perf_event_open(
-                &mut attrs,
-                opt.pid,
-                cpu as i32,
-                -1,
-                perf::bindings::PERF_FLAG_FD_CLOEXEC as u64,
-            )
-        };
-        let link = skel.progs_mut().profile().attach_perf_event(result)?;
-        perf_fds.insert(result, link);
-        if opt.debug {
-            println!("perf fd on cpu {}: {}", cpu, result);
+        for cpu in 0..num_cpus::get() {
+            let mut attrs = perf::bindings::perf_event_attr::default();
+            attrs.size = std::mem::size_of::<perf::bindings::perf_event_attr>() as u32;
+            if opt.event == "cycles" {
+                attrs.type_ = perf::bindings::perf_type_id_PERF_TYPE_HARDWARE;
+                attrs.config = perf::bindings::perf_hw_id_PERF_COUNT_HW_CPU_CYCLES as u64;
+            } else if opt.event == "clock" {
+                attrs.type_ = perf::bindings::perf_type_id_PERF_TYPE_SOFTWARE;
+                attrs.config = perf::bindings::perf_sw_ids_PERF_COUNT_SW_CPU_CLOCK as u64;
+            }
+            attrs.__bindgen_anon_1.sample_freq = opt.freq;
+            attrs.set_freq(1);
+            // attrs.set_exclude_kernel(0);
+            attrs.set_exclude_hv(1);
+            let result = unsafe {
+                perf::perf_event_open(
+                    &mut attrs,
+                    opt.pid,
+                    cpu as i32,
+                    -1,
+                    perf::bindings::PERF_FLAG_FD_CLOEXEC as u64,
+                )
+            };
+            let link = skel.progs_mut().profile().attach_perf_event(result)?;
+            perf_fds.insert(result, link);
+            if opt.debug {
+                println!("perf fd on cpu {}: {}", cpu, result);
+            }
         }
     }
 
@@ -471,6 +510,6 @@ fn main() -> Result<()> {
     while running.load(Ordering::SeqCst) {
         rb.poll(Duration::from_millis(1))?;
     }
-    perf_fds.capacity();
+    // perf_fds.capacity();
     Ok(())
 }

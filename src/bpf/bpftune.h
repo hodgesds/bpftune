@@ -23,4 +23,13 @@ struct stacktrace_event {
 	stack_trace_t ustack;
 };
 
+struct eth_event {
+	__u8	ttl;
+	__u8	proto;
+	__s32	saddr;
+	__s32	daddr;
+	__s32	seq;
+	__s16   port;
+};
+
 #endif /* __PROFILE_H_ */
